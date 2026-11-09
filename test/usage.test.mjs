@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { fetchUsage, forecastView } from "../usage.ts"
+import { fetchUsage, forecastView, renderReport } from "../usage.ts"
 
 function stubFetch(responses) {
   const calls = []
@@ -130,4 +130,34 @@ test("零消费期不除零", () => {
   assert.equal(f.percentUsed, 0)
   assert.ok(f.daily.length >= 1)
   assert.equal(f.forecastPercent, 0)
+})
+
+// ---- Task 3: renderReport 本期日消费节 ----
+
+test("renderReport 含本期日消费表与 forecast 结论", () => {
+  const out = renderReport(snapOf(), NOW)
+  assert.match(out, /\*\*本期日消费\*\*（11\/1 以来 · 月上限 \$60）/)
+  assert.match(out, /\| 11\/5（今） \|/)
+  assert.match(out, /\| \$0\.94 \|/)
+  assert.match(out, /→ 本期结束（12\/1）预计用量 ~34%，暂无触顶风险/)
+})
+
+test("renderReport 触顶变体", () => {
+  const used = { resetsAt: "2026-12-01T00:00:00.000Z", limitMicroCents: "6000000000", usedMicroCents: "4500000000" }
+  const act = {
+    startsAt: "2026-11-01T00:00:00.000Z",
+    daily: [
+      { date: "2026-11-01", totalCostMicroCents: "4500000000" },
+      { date: "2026-11-02", totalCostMicroCents: "0" },
+    ],
+  }
+  const out = renderReport(snapOf(used, act), Date.parse("2026-11-02T12:00:00Z"))
+  assert.match(out, /→ ⚠ 按此节奏预计 11\/3 触顶/)
+  assert.doesNotMatch(out, /暂无触顶风险/)
+})
+
+test("无 activity 时报告不出现本期日消费节", () => {
+  const out = renderReport({ fetchedAt: NOW, errors: [], go: { access: { meters: { month: META.meter } } } }, NOW)
+  assert.doesNotMatch(out, /本期日消费/)
+  assert.match(out, /OpenCode 用量/)
 })

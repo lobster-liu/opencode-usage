@@ -299,6 +299,19 @@ export function sidebarLines(snapshot: UsageSnapshot | undefined, now: number = 
   return lines
 }
 
+/** 图表分块：把数组切成 n 个一行。 */
+function chunk<T>(items: T[], n: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += n) out.push(items.slice(i, i + n))
+  return out
+}
+
+/** `M/D` 形式的 UTC 日期标签。 */
+function shortDate(iso: string): string {
+  const [, month, day] = iso.split("-")
+  return `${Number(month)}/${Number(day)}`
+}
+
 /** Full markdown report used by the `/usage` command and the agent tool. */
 export function renderReport(snapshot: UsageSnapshot, now: number = Date.now()): string {
   const stamp = new Date(snapshot.fetchedAt ?? now).toLocaleString()
@@ -326,6 +339,27 @@ export function renderReport(snapshot: UsageSnapshot, now: number = Date.now()):
     if (snapshot.go?.useBalance === false) {
       lines.push("")
       lines.push("_超额后不会回落到余额计费（Extra usage 未开启）。_")
+    }
+    lines.push("")
+  }
+
+  const forecast = forecastView(snapshot, now)
+  if (forecast && forecast.daily.length) {
+    const limit = Number(snapshot.go?.access?.meters?.month?.limitMicroCents)
+    const periodStart = shortDate(new Date(snapshot.activity?.startsAt ?? snapshot.go?.access?.startsAt ?? "").toISOString().slice(0, 10))
+    lines.push(`**本期日消费**（${periodStart} 以来 · 月上限 ${formatUsdCompact(limit)}）`)
+    lines.push("")
+    const today = new Date(now).toISOString().slice(0, 10)
+    for (const group of chunk(forecast.daily, 6)) {
+      lines.push(`| ${group.map((d) => shortDate(d.date) + (d.date === today ? "（今）" : "")).join(" | ")} |`)
+      lines.push(`| ${group.map((d) => formatUsdCompact(d.usd * 100_000_000)).join(" | ")} |`)
+    }
+    lines.push("")
+    const endDate = shortDate(new Date(snapshot.go?.access?.meters?.month?.resetsAt ?? "").toISOString().slice(0, 10))
+    if (forecast.forecastPercent !== undefined && forecast.forecastPercent <= 100) {
+      lines.push(`→ 本期结束（${endDate}）预计用量 ~${Math.round(forecast.forecastPercent)}%，暂无触顶风险`)
+    } else if (forecast.runsOutAt) {
+      lines.push(`→ ⚠ 按此节奏预计 ${shortDate(new Date(forecast.runsOutAt).toISOString().slice(0, 10))} 触顶`)
     }
     lines.push("")
   }
