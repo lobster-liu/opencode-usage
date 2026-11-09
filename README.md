@@ -6,12 +6,15 @@
 
 ```
 ~/.config/opencode/plugins/opencode-usage/
-├── index.ts   # 服务端插件：/usage 命令 + opencode_usage 工具
-├── tui.tsx    # TUI 插件：侧边栏常驻显示
-└── usage.ts   # 共用的取数与格式化逻辑
+├── index.ts              # 服务端插件：RPC + opencode_usage 工具
+├── tui.tsx               # TUI 插件：侧边栏常驻显示
+├── usage.ts              # 共用的取数与格式化逻辑
+├── rpc.ts                # 服务端→GUI 的取数契约
+├── src/gui.tsx           # 桌面端 GUI 面板源码
+└── gui-experimental.cjs  # 构建产物（vite build 生成）
 ```
 
-OpenCode 会自动发现这个目录，无需改 `opencode.json` 或 `cli.json`。
+OpenCode 会自动发现这个目录。桌面端的面板需要在 `opencode.json` 的 `plugins` 里列出该目录（已配置）；TUI 侧边栏不需要。
 
 ## 用起来是什么样
 
@@ -28,7 +31,7 @@ Console $9.40 · 本月 $0.25
 用量 ≥ 70% 变黄，≥ 90% 变红。倒数第二行的 **forecast** 是本期的消费走势（sparkline）与线性外推：
 `月底约 N% ↗` 表示按当前节奏本期结束时的预计用量（外推 ≥30% 时该行变黄）；若按此节奏会提前触顶则显示 `11/28 触顶`，额度已用尽则显示 `已触顶`（均为红色）。本期不足 1 天时该行不显示。
 
-**桌面端 / 网页版**：在聊天框输入 `/usage`，会直接在对话里输出一份完整报表：
+**桌面端**：在聊天框输入 `/usage`（或在侧边栏的 **+** 菜单 / 命令面板里选「OpenCode 用量」），会在会话侧边打开一个面板，显示完整报表：
 
 ```
 **OpenCode 用量** · 2026/10/21 23:22:59
@@ -51,7 +54,7 @@ Console $9.40 · 本月 $0.25
 - 本月已消费：$0.25
 ```
 
-> 报告刻意使用**纯文本行**而不是 Markdown 表格——桌面端对 synthetic 消息只渲染普通段落，表格/代码块会被丢弃；纯文本在桌面端和 TUI 都能完整显示。
+> 桌面端通过 GUI 插件面板展示，**不会向对话插入消息、不会触发模型回复**。数据经插件 RPC 在服务端获取（Console API 的 CORS 只允许 opencode.ai，桌面窗口不能直连）。
 
 「本期日消费」与结论行与官网 Console 的 Activity 页算法一致（逐日按消费占比归一，结论按已过时间线性外推）；若按当前节奏会在本期结束前触顶，结论行会变成 `→ ⚠ 按此节奏预计 11/28 触顶`，额度已用尽则为 `→ ⚠ 本期额度已用尽`。
 
@@ -80,12 +83,14 @@ Console $9.40 · 本月 $0.25
 | 现象 | 处理 |
 | --- | --- |
 | 侧边栏显示「用量读取失败（/connect）」 | 先 `/connect` 登录 OpenCode Console |
-| 侧边栏不显示 | 确认用的是终端 TUI（`opencode`）；桌面端是 Web UI，没有插件插槽，只能用 `/usage` |
+| TUI 侧边栏不显示 | 确认用的是终端 TUI（`opencode`），终端宽度足够时侧边栏才显示 |
+| 桌面端 `/usage` 没反应 | 确认 `opencode.json` 的 `plugins` 里列出了插件目录；改完 GUI 源码后跑 `npx vite build`，或重启桌面端 |
 | `/usage` 不在斜杠菜单里 | 跑 `opencode plugin list`，应能看到 `opencode-usage` |
 | 数字不更新 | 看 `~/.local/share/opencode/log/opencode.log`，插件改动会自动热重载 |
 
 ## 注意
 
+- 桌面端的 `/usage` 打开的是**侧边面板**，不会往对话里发消息、不会让模型回复。
 - Go 的 meter（接口返回的 5h / 周 / 月上限）是**全模型共享池**（当前月池 $60）；官网价目表里「仅用某模型」的上限（如 DeepSeek V4.1 Flash $100）表示独占全池时的折算额度，插件展示的是共享池百分比。
 - `5h` 窗口没有使用时 `resetsAt` 为空，报表里显示「未开始」。
 - 「本月已消费」是 Console credits 的实际扣减，不含 Go 订阅覆盖的调用。
