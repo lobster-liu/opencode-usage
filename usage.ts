@@ -52,11 +52,24 @@ export interface MembersResponse {
   }>
 }
 
+/** GET /console/api/activity/go — the Console Activity page's Go spending chart data. */
+export interface ActivityGo {
+  startsAt?: string
+  daily?: Array<{
+    date?: string
+    totalCostMicroCents?: string
+    totalTokens?: string
+    totalRequests?: string
+  }>
+  models?: Array<{ provider?: string; model?: string; totalRequests?: string }>
+}
+
 export interface UsageSnapshot {
   fetchedAt: number
   go?: GoStatus
   billing?: BillingStatus
   spentMicroCents?: string
+  activity?: ActivityGo
   errors: string[]
 }
 
@@ -86,6 +99,11 @@ export async function fetchUsage(token: string): Promise<UsageSnapshot> {
         snapshot.go = go
       })
       .catch((error) => snapshot.errors.push(`go: ${describe(error)}`)),
+    read<ActivityGo>("/console/api/activity/go")
+      .then((activity) => {
+        snapshot.activity = activity
+      })
+      .catch((error) => snapshot.errors.push(`activity: ${describe(error)}`)),
     read<BillingStatus>("/console/api/billing/status")
       .then((billing) => {
         snapshot.billing = billing
