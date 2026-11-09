@@ -197,6 +197,85 @@ export function meterViews(snapshot: UsageSnapshot | undefined, now: number = Da
     })
 }
 
+export interface ForecastDay {
+  date: string
+  usd: number
+  percent: number
+}
+
+export interface ForecastView {
+  windowDays: number
+  elapsedDays: number
+  daily: ForecastDay[]
+  totalUsd: number
+  percentUsed: number
+  forecastPercent?: number
+  runsOutAt?: string
+  exhausted: boolean
+}
+
+function microCentsToUsd(value: string | number | undefined): number {
+  return Number(value ?? 0) / 100_000_000
+}
+
+/**
+ * Official Console forecast algorithm (the frontend `Ome` helper in the
+ * Console bundle): percent-used `c` scaled linearly over the remaining
+ * window, daily bars proportional to each day's share of the period total,
+ * and an on-pace overrun date when the forecast crosses 100%.
+ *
+ *   c = percent used (2 decimals; 100 when exhausted)
+ *   daily value = c × day cost ÷ period total
+ *   forecast = c × (full window ÷ elapsed), only when elapsed ≥ 1 day
+ */
+export function forecastView(snapshot: UsageSnapshot | undefined, now: number = Date.now()): ForecastView | undefined {
+  const meter = snapshot?.go?.access?.meters?.month
+  const startsAt = snapshot?.activity?.startsAt ?? snapshot?.go?.access?.startsAt
+  const resetsAt = meter?.resetsAt
+  if (!meter?.limitMicroCents || !startsAt || !resetsAt) return undefined
+
+  const start = new Date(startsAt).getTime()
+  const end = new Date(resetsAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return undefined
+
+  const used = Number(meter.usedMicroCents ?? 0)
+  const limit = Number(meter.limitMicroCents)
+  const exhausted = used >= limit
+  const percentUsed = exhausted || limit <= 0 ? 100 : Math.round((used / limit) * 10000) / 100
+
+  const sourceDays = (snapshot.activity?.daily ?? [])
+    .filter((day) => !!day.date && new Date(`${day.date}T00:00:00Z`).getTime() >= start)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+  const usdDays = sourceDays.map((day) => ({ date: day.date as string, usd: microCentsToUsd(day.totalCostMicroCents) }))
+  const totalUsd = usdDays.reduce((sum, day) => sum + day.usd, 0)
+
+  const clampedNow = Math.min(Math.max(now, start), end)
+  if (now > end) return undefined // 本期已重置，旧活动数据不再有意义
+  const elapsedMs = clampedNow - start
+  const daily: ForecastDay[] =
+    totalUsd > 0
+      ? usdDays.map((day) => ({ date: day.date, usd: day.usd, percent: (percentUsed * day.usd) / totalUsd }))
+      : [{ date: new Date(clampedNow).toISOString().slice(0, 10), usd: 0, percent: 0 }]
+
+  const forecastPercent = elapsedMs >= 86_400_000 ? (exhausted ? 100 : (percentUsed * (end - start)) / elapsedMs) : undefined
+  const runsOutAt =
+    forecastPercent !== undefined && forecastPercent > 100 && !exhausted
+      ? new Date(start + (elapsedMs * 100) / percentUsed).toISOString()
+      : undefined
+
+  return {
+    windowDays: (end - start) / 86_400_000,
+    elapsedDays: elapsedMs / 86_400_000,
+    daily,
+    totalUsd,
+    percentUsed,
+    forecastPercent,
+    runsOutAt,
+    exhausted,
+  }
+}
+
 /** Compact single line used by the TUI sidebar. */
 export function sidebarLines(snapshot: UsageSnapshot | undefined, now: number = Date.now()): string[] {
   if (!snapshot) return ["用量加载中…"]
