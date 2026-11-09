@@ -4,7 +4,7 @@ import { Usage } from "../rpc"
 
 function UsageView() {
   const ctx = usePlugin()
-  const [report] = createResource(() => ctx.client.rpc(Usage).report())
+  const [report] = createResource(() => ctx.client.rpc(Usage).report({}))
 
   return (
     <pre
@@ -62,7 +62,7 @@ export default Plugin.define({
       id: "usage",
       region: "side",
       width: "narrow",
-      list: (input) => (input.open.includes("usage") ? [tab] : []),
+      list: (input) => (input.open.some((id) => id === "usage" || id.endsWith(":usage")) ? [tab] : []),
       render: () => <UsageView />,
     })
   },
