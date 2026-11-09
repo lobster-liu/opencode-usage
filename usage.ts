@@ -406,17 +406,10 @@ export function renderReport(snapshot: UsageSnapshot, now: number = Date.now()):
       }`,
     )
     lines.push("")
-    lines.push("```")
-    lines.push("| 窗口 | 已用 | 上限 | 用量 | 重置 |")
-    lines.push("| --- | --- | --- | --- | --- |")
     for (const meter of meters) {
-      lines.push(
-        `| ${meter.label} | ${meter.used} | ${meter.limit} | ${meter.percent}% | ${
-          meter.reset ? `${meter.reset} 后` : "未开始"
-        } |`,
-      )
+      const reset = meter.reset ? `${meter.reset} 后` : "未开始"
+      lines.push(`${meter.label}：${meter.used} / ${meter.limit} · ${meter.percent}% · ${reset}`)
     }
-    lines.push("```")
     if (snapshot.go?.useBalance === false) {
       lines.push("")
       lines.push("_超额后不会回落到余额计费（Extra usage 未开启）。_")
@@ -430,17 +423,14 @@ export function renderReport(snapshot: UsageSnapshot, now: number = Date.now()):
     const periodStart = shortDate(new Date(snapshot.activity?.startsAt ?? snapshot.go?.access?.startsAt ?? "").toISOString().slice(0, 10))
     lines.push(`**本期日消费**（${periodStart} 以来 · 月上限 ${formatUsdCompact(limit)}）`)
     lines.push("")
-    lines.push("```")
     const today = new Date(now).toISOString().slice(0, 10)
-    const blocks = chunk(forecast.daily, 6).map((group) =>
-      [
-        `| ${group.map((d) => shortDate(d.date) + (d.date === today ? "（今）" : "")).join(" | ")} |`,
-        `| ${group.map(() => "---").join(" | ")} |`,
-        `| ${group.map((d) => formatUsdCompact(d.usd * 100_000_000)).join(" | ")} |`,
-      ].join("\n"),
-    )
-    lines.push(blocks.join("\n\n"))
-    lines.push("```")
+    for (const group of chunk(forecast.daily, 4)) {
+      lines.push(
+        group
+          .map((d) => `${shortDate(d.date)}${d.date === today ? "（今）" : ""} ${formatUsdCompact(d.usd * 100_000_000)}`)
+          .join(" · "),
+      )
+    }
     lines.push("")
     const endDate = shortDate(new Date(snapshot.go?.access?.meters?.month?.resetsAt ?? "").toISOString().slice(0, 10))
     if (forecast.status === "exhausted") {

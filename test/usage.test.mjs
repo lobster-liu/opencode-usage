@@ -144,11 +144,10 @@ test("零消费期不除零", () => {
 
 // ---- Task 3: renderReport 本期日消费节 ----
 
-test("renderReport 含本期日消费表与 forecast 结论", () => {
+test("renderReport 含本期日消费与 forecast 结论", () => {
   const out = renderReport(snapOf(), NOW)
   assert.match(out, /\*\*本期日消费\*\*（11\/1 以来 · 月上限 \$60）/)
-  assert.match(out, /\| 11\/5（今） \|/)
-  assert.match(out, /\| \$0\.94 \|/)
+  assert.match(out, /11\/5（今） \$0\.94/)
   assert.match(out, /→ 本期结束（12\/1）预计用量 ~34%，暂无触顶风险/)
 })
 
@@ -205,9 +204,9 @@ test("无 forecast 的 snapshot 无 forecast 行", () => {
   assert.equal(lines.some((l) => l.includes("月底约")), false)
 })
 
-// ---- Review 修复：GFM 表格完整性 / 期首日 / 触顶 / 空日序列 ----
+// ---- 客户端兼容：纯文本行（不使用表格/代码块） ----
 
-test("日消费表是合法 GFM：每分块有分隔行、分块间空行", () => {
+test("报告使用纯文本行，不含表格竖线或代码块", () => {
   const act = {
     startsAt: "2026-11-01T00:00:00.000Z",
     daily: Array.from({ length: 8 }, (_, i) => ({
@@ -216,23 +215,29 @@ test("日消费表是合法 GFM：每分块有分隔行、分块间空行", () =
     })),
   }
   const out = renderReport(snapOf(META.meter, act), Date.parse("2026-11-08T12:00:00Z"))
-  const section = out.slice(out.indexOf("**本期日消费**"))
-  const table = section.split("\n").filter((line) => line.startsWith("|"))
-  // 两个分块 × (日期表头 + 分隔行 + 金额行) = 6 行
-  assert.equal(table.length, 6)
-  assert.match(table[1], /^\|( --- \|)+$/)
-  assert.match(table[4], /^\|( --- \|)+$/)
-  assert.match(out, /\| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \|\n\n\| 11\/7 \|/)
+  assert.doesNotMatch(out, /\|/)
+  assert.doesNotMatch(out, /```/)
+  assert.match(out, /月：\$3\.08 \/ \$60\.00 · 5% · 22d12h 后/)
 })
 
-test("表格放进代码块（客户端不渲染 GFM 表格时仍能等宽显示）", () => {
+test("日消费按每行 4 天分块输出", () => {
+  const act = {
+    startsAt: "2026-11-01T00:00:00.000Z",
+    daily: Array.from({ length: 8 }, (_, i) => ({
+      date: `2026-11-0${i + 1}`,
+      totalCostMicroCents: "10000000",
+    })),
+  }
+  const out = renderReport(snapOf(META.meter, act), Date.parse("2026-11-08T12:00:00Z"))
+  assert.match(out, /11\/1 \$0\.1 · 11\/2 \$0\.1 · 11\/3 \$0\.1 · 11\/4 \$0\.1/)
+  assert.match(out, /11\/5 \$0\.1 · 11\/6 \$0\.1 · 11\/7 \$0\.1 · 11\/8（今） \$0\.1/)
+  assert.match(out, /→ 本期结束/)
+})
+
+test("报告里今天标记跟在日期后（纯文本）", () => {
   const out = renderReport(snapOf(), NOW)
-  // Go 表在代码块内
-  assert.match(out, /\*\*Go\*\*[^\n]*\n\n```\n\| 窗口 \| 已用 \| 上限 \| 用量 \| 重置 \|/)
-  assert.match(out, /\| 月 \| \$3\.08 \| \$60\.00 \| 5% \| 25d12h 后 \|\n```\n/)
-  // 日消费表在代码块内，结论行在代码块外
-  assert.match(out, /\*\*本期日消费\*\*[^\n]*\n\n```\n\| 11\/1 \|/)
-  assert.match(out, /\| \$0\.94 \|\n```\n\n→ 本期结束/)
+  assert.match(out, /11\/5（今） \$0\.94/)
+  assert.match(out, /\*\*本期日消费\*\*（11\/1 以来 · 月上限 \$60）/)
 })
 
 test("期首日按日期过滤（startsAt 非零点也要包含当天）", () => {
