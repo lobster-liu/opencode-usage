@@ -5,7 +5,7 @@ import { Rpc } from "@opencode/plugin/rpc"
  * 拿到已经渲染好的纯文本报告（桌面端不需要自己处理凭据与 CORS）。
  */
 export const Usage = Rpc.define({
-  id: "opencode-usage",
+  id: "usage-forecast",
   methods: {
     report: {
       input: {

@@ -5,7 +5,7 @@ import { describe, fetchUsage, renderReport } from "./usage.ts"
 const INTEGRATION_ID = "opencode"
 
 export default Plugin.define({
-  id: "opencode-usage",
+  id: "usage-forecast",
   async setup(ctx) {
     async function snapshot() {
       const connection = await ctx.integration.connection.active(INTEGRATION_ID)
