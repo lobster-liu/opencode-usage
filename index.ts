@@ -1,4 +1,5 @@
 import { Plugin } from "@opencode/plugin"
+import { Usage } from "./rpc.ts"
 import { describe, fetchUsage, renderReport } from "./usage.ts"
 
 const INTEGRATION_ID = "opencode"
@@ -15,19 +16,9 @@ export default Plugin.define({
       return await fetchUsage(token)
     }
 
-    await ctx.command.transform((editor) => {
-      editor.add({
-        name: "usage",
-        description: "查看 OpenCode Go 用量、Console 余额与本月消费",
-        execute: async ({ sessionID }) => {
-          try {
-            const result = await snapshot()
-            await ctx.session.synthetic({ sessionID, text: renderReport(result) })
-          } catch (error) {
-            await ctx.session.synthetic({ sessionID, text: `用量查询失败：${describe(error)}` })
-          }
-        },
-      })
+    // GUI 面板通过 RPC 取数，避免桌面端直接请求 Console API（CORS 只允许 opencode.ai）
+    await ctx.rpc.register(Usage, {
+      report: async () => ({ text: renderReport(await snapshot()) }),
     })
 
     await ctx.tool.transform((editor) => {
