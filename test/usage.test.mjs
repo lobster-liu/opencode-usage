@@ -1,6 +1,14 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { fetchUsage, forecastView, renderReport } from "../usage.ts"
+import {
+  fetchUsage,
+  forecastLabel,
+  forecastLine,
+  forecastView,
+  renderReport,
+  sidebarLines,
+  sparkline,
+} from "../usage.ts"
 
 function stubFetch(responses) {
   const calls = []
@@ -160,4 +168,33 @@ test("无 activity 时报告不出现本期日消费节", () => {
   const out = renderReport({ fetchedAt: NOW, errors: [], go: { access: { meters: { month: META.meter } } } }, NOW)
   assert.doesNotMatch(out, /本期日消费/)
   assert.match(out, /OpenCode 用量/)
+})
+
+// ---- Task 4: sidebar forecast row ----
+
+const F34 = forecastView(snapOf(), NOW)
+
+test("sparkline 分组与空样", () => {
+  assert.equal(sparkline([]), "")
+  assert.equal(sparkline([0, 0, 0, 0, 1, 0, 0, 0, 2]).length, 8)
+})
+
+test("forecastLabel 三态", () => {
+  assert.equal(forecastLabel({ ...F34, forecastPercent: undefined }), "")
+  assert.equal(forecastLabel(F34), "月底约 34% ↗")
+  assert.equal(forecastLabel({ ...F34, forecastPercent: 150.4, runsOutAt: "2026-11-28T00:00:00Z" }), "11/28 触顶")
+})
+
+test("sidebarLines 在 Console 行前插 forecast 行", () => {
+  const snapshot = { ...snapOf(), billing: { balanceMicroCents: "940000000" } }
+  const lines = sidebarLines(snapshot, NOW)
+  const i = lines.findIndex((l) => l.includes("月底约"))
+  assert.ok(i > 0)
+  assert.match(lines[i + 1], /^Console/)
+  assert.equal(lines[i].length >= 9 && lines[i].length <= 20, true)
+})
+
+test("无 forecast 的 snapshot 无 forecast 行", () => {
+  const lines = sidebarLines({ ...snapOf(), activity: undefined }, NOW)
+  assert.equal(lines.some((l) => l.includes("月底约")), false)
 })

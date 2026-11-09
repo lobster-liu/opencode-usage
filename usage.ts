@@ -276,6 +276,45 @@ export function forecastView(snapshot: UsageSnapshot | undefined, now: number = 
   }
 }
 
+export const SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
+
+/** 小型走势图：样本 ≤ width 时逐日一字符，超过则等宽分组取组内最大值。 */
+export function sparkline(days: number[], width: number = 8): string {
+  if (!days.length) return ""
+  let buckets = days
+  if (days.length > width) {
+    buckets = Array.from({ length: width }, (_, i) => {
+      const start = Math.floor((i * days.length) / width)
+      const end = Math.max(start + 1, Math.floor(((i + 1) * days.length) / width))
+      return Math.max(...days.slice(start, end))
+    })
+  }
+  const peak = Math.max(...buckets)
+  return buckets
+    .map((value) => {
+      if (peak <= 0) return SPARK_BLOCKS[0]
+      return SPARK_BLOCKS[Math.min(SPARK_BLOCKS.length - 1, Math.floor((value / peak) * (SPARK_BLOCKS.length - 1) + 0.0001))]
+    })
+    .join("")
+}
+
+/** `月底约 34% ↗` / `11/28 触顶`；forecast 无效（未定义）时为空。 */
+export function forecastLabel(forecast: ForecastView | undefined): string {
+  const value = forecast?.forecastPercent
+  if (value === undefined) return ""
+  if (value <= 100) return `月底约 ${Math.round(value)}% ↗`
+  return forecast.runsOutAt ? `${shortDate(new Date(forecast.runsOutAt).toISOString().slice(0, 10))} 触顶` : ""
+}
+
+/** 侧边栏一行：`▁▂▄▅▆▇ 月底约 34% ↗`；本期刚开始（<1 天）无 forecast 时不返回。 */
+export function forecastLine(snapshot: UsageSnapshot | undefined, now: number = Date.now()): string {
+  const forecast = forecastView(snapshot, now)
+  const label = forecastLabel(forecast)
+  if (!label) return ""
+  const bars = sparkline(forecast.daily.map((day) => day.percent))
+  return bars ? `${bars} ${label}` : label
+}
+
 /** Compact single line used by the TUI sidebar. */
 export function sidebarLines(snapshot: UsageSnapshot | undefined, now: number = Date.now()): string[] {
   if (!snapshot) return ["用量加载中…"]
@@ -290,6 +329,8 @@ export function sidebarLines(snapshot: UsageSnapshot | undefined, now: number = 
     const resets = meters.filter((meter) => meter.reset)
     if (resets.length) lines.push(`↻ ${resets.map((meter) => meter.reset).join(" · ")}`)
   }
+  const forecastRow = forecastLine(snapshot, now)
+  if (forecastRow) lines.push(forecastRow)
   const balance = formatUsd(snapshot.billing?.availableMicroCents ?? snapshot.billing?.balanceMicroCents)
   if (balance !== "-") {
     const spent = formatUsd(snapshot.spentMicroCents)
