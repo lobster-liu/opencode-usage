@@ -1,4 +1,4 @@
-# Activity forecast（方案 B）Implementation Plan
+﻿# Activity forecast（方案 B）Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - 插件目录（`C:\Users\KHADAS\.config\opencode\plugins\opencode-usage\`）**不是 git 仓库**：无 commit 步骤，每任务以绿色测试收尾。
-- 测试命令：`node --test test\` （在插件目录下运行），测试文件置 `test\usage.test.mjs`，直接 `import("../usage.ts")`，通过替换 `globalThis.fetch` stub 网络，断网可跑。
+- 测试命令：`node --test` （在插件目录下运行），测试文件置 `test\usage.test.mjs`，直接 `import("../usage.ts")`，通过替换 `globalThis.fetch` stub 网络，断网可跑。
 - 不新增任何依赖；`index.ts` 不改；60s 刷新机制不动。
 - Forecast 算法与官方一致：`c = used≥limit ? 100 : round(used×10000/limit)/100`；`forecast = elapsed≥1d ? (已耗尽 ? 100 : c×(整期/已过)) : undefined`；`runsOut = forecast>100 && !耗尽 ? start+已过×100/c : undefined`。
 - 月上限不硬编码，跟随 `meters.month.limitMicroCents`。
@@ -86,10 +86,10 @@ test("activity 失败仅记错误且不影响其它数据", async () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `node --test test\` → 两条 test 里 "附带 activity 数据" FAIL（snap.activity undefined）。
+- [ ] **Step 2: Run test to verify it fails** — `node --test` → 两条 test 里 "附带 activity 数据" FAIL（snap.activity undefined）。
 - [ ] **Step 3: Implement** — `usage.ts`：加 `ActivityGo` interface 与 `UsageSnapshot.activity` 字段；`fetchUsage` 的 `Promise.all` 里并行加 `read<ActivityGo>("/console/api/activity/go")` 成功挂 `snapshot.activity`、catch 追记 `activity: ${describe(error)}`。
-- [ ] **Step 4: Run test to verify it passes** — `node --test test\` 全绿。
-- [ ] **Step 5: 既有测试不受影响**（无 commit，见 Global Constraints）— 跑全量 `node --test test\` 即收尾。
+- [ ] **Step 4: Run test to verify it passes** — `node --test` 全绿。
+- [ ] **Step 5: 既有测试不受影响**（无 commit，见 Global Constraints）— 跑全量 `node --test` 即收尾。
 
 ### Task 2: `forecastView()` 复刻官方算法
 
@@ -163,6 +163,8 @@ test("forecastView 触顶给出 runsOutAt", () => {
   assert.equal(new Date(f.runsOutAt).toISOString().startsWith("2026-11-01T16:00"), true)
 })
 
+> **Amendment (2026-11-09, 审查后):** 上文 Task 2 fixture 有三处算术/语义错误，实现按官方语义为准（详见台账 rulings）：① `daily` 归一除数是 daily 系列总量 **$2.74**，不是 meter 用量 $3.08（`totalUsd` 断言应为 2.74）；② 触顶用例 `elapsed` 必须 ≥1 天，否则命中 `<1d` 规则先返回 undefined（改用 1.5 天、runsOut 11/03T00:00Z）；③ 零消费用例 `percentUsed` 来自 meter、与 daily 无关，`daily` 应为空且不伪造 $0 行。另：`now > resetsAt` 返回 undefined（非 clamp）；期首日按 `date ≥ startsAt 的 UTC 日` 过滤（不能用完整时间戳，否则省首日）。后续执行者请勿把代码改回本节旧断言。
+
 test("elapsed<1d 时 forecast 未定义", () => {
   const f = forecastView(snapOf("", meta.meter), Date.parse("2026-11-01T06:00:00Z"))
   assert.equal(f.forecastPercent, undefined)
@@ -191,10 +193,10 @@ test("零消费期不除零", () => {
 
 （第二例 runsOut 断言按官方公式 start=11/01T00:00Z，elapsed=12h=0.5d，c=75 → runsOut=start+0.5d×100/75=11/01T16:00Z；断言写 `d.toISOString().startsWith("2026-11-01T16:00")`。）
 
-- [ ] **Step 2: Run test to verify it fails** — `node --test test\` → 新增 6 例 FAIL（forecastView is not exported）。
+- [ ] **Step 2: Run test to verify it fails** — `node --test` → 新增 6 例 FAIL（forecastView is not exported）。
 - [ ] **Step 3: Implement `forecastView`** § 算法按 Global Constraints 第 5 条，窗口取 `activity.startsAt`（缺则 `access.startsAt`，仍无 → undefined）与 `meters.month.resetsAt`；daily 过滤 `date ≥ startsAt 的 UTC 日`；`percentUsed` 与外推照抄 Global Constraints；total = daily 之和（µc→USD /1e8）；daily 全 0 时 total=0 → daily 塌缩 `[{今日, 0}]`。
 - [ ] **Step 4: Run test to verify it passes** — 全绿。
-- [ ] **Step 5: 全量回归** — `node --test test\`。
+- [ ] **Step 5: 全量回归** — `node --test`。
 
 ### Task 3: `renderReport` 增「本期日消费」节
 
@@ -206,9 +208,10 @@ test("零消费期不除零", () => {
 - Consumes: Task 2 `forecastView`。
 - Produces: 报告固定输出（字符串断言锚点为本任务之测试，也是 Task 5 端到端检查的基准）：
   - 节标题：``**本期日消费**（11/05 以来 · 月上限 $60）``（期起取 `activity.startsAt` 的 UTC 日 `M/D`；上限 `formatUsd(limitMicroCents)`）
-  - 表：每块 6 列，表头 `| 11/04 | 11/05 | … |`（UTC 日 `M/D（今）`），下一行 `| $0.08 | $0.55 | … |`（`formatUsdCompact`）；daily 塌缩成单点时用单列表。
-  - 结论行（forecastPercent ≤ 100）：`→ 本期结束（12/04）预计用量 ~34%，暂无触顶风险`（余额重置日 → resetsAt 的 `M/D`）
+  - 表：每块 6 列，表头 `| 11/04 | 11/05 | … |`（UTC 日 `M/D（今）`），**紧跟 GFM 分隔行 `| --- | … |`**，下一行 `| $0.08 | $0.55 | … |`（`formatUsdCompact`）；分块之间必须空行隔开，否则会被解析成同一张表；daily 为空（无消费日）时不输出本节。
+  - 结论行（forecastPercent ≤ 100 且非触顶）：`→ 本期结束（12/04）预计用量 ~34%，暂无触顶风险`（余额重置日 → resetsAt 的 `M/D`）
   - 结论行（>100）：`→ ⚠ 按此节奏预计 {M/D} 触顶`（runsOutAt 的 `M/D`）
+  - 结论行（exhausted）：`→ ⚠ 本期额度已用尽`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -231,10 +234,10 @@ test("无 activity 时报告不出现本期日消费节", () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails** — `node --test test\` → 新增 3 例 FAIL。
+- [ ] **Step 2: Run test to verify it fails** — `node --test` → 新增 3 例 FAIL。
 - [ ] **Step 3: Implement renderReport 插节** — 仅当 `f = forecastView(...)` 存在时插节；分块 6 列用私有 helper `chunk(arr, n)`；`（今）`判断：`d.date === new Date(now).toISOString().slice(0,10)`（UTC 日）。
 - [ ] **Step 4: Run test to verify it passes** — 全绿。
-- [ ] **Step 5: 全量回归** — `node --test test\`。
+- [ ] **Step 5: 全量回归** — `node --test`。
 
 ### Task 4: 侧边栏 forecast 行（`sidebarLines` + sparkline helper）
 
@@ -250,7 +253,7 @@ test("无 activity 时报告不出现本期日消费节", () => {
 export const SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 export function sparkline(days: number[], width?: number): string  // 默认 8 格；样本≤width 时逐日，>width 时按等宽分组取 max
 export function forecastLabel(f: ForecastView | undefined, now?: number): string
-// f?.forecastPercent===undefined → ""；≤100 → `月底约 ${Math.round}% ↗`；>100 → `MM/DD 触顶`
+// forecastPercent===undefined → ""；exhausted → `已触顶`；overrun → `MM/DD 触顶`；否则 → `月底约 ${Math.round}% ↗`
 export function forecastLine(snapshot: UsageSnapshot | undefined, now?: number): string
 // 无 forecast → ""；有 → sparkline + " " + label（如 `▁▂▄▅▆▇▂▂ 月底约 34% ↗`）
 ```
@@ -288,7 +291,7 @@ test("无 forecast 的 snapshot 无 forecast 行", () => {
 - [ ] **Step 2: Run test to verify it fails**。
 - [ ] **Step 3: Implement three functions + sidebarLines 插行** — `sidebarLines` 现有实现里 `const balance = formatUsd(...)` 前插入 `const forecast = forecastLine(snapshot, now); if (forecast) lines.push(forecast)`。
 - [ ] **Step 4: Run test to verify it passes**。
-- [ ] **Step 5: 全量回归** — `node --test test\`。
+- [ ] **Step 5: 全量回归** — `node --test`。
 
 ### Task 5: TUI 接线 + 端到端验证
 
@@ -299,7 +302,7 @@ test("无 forecast 的 snapshot 无 forecast 行", () => {
 
 **Interfaces:**
 - Consumes: Task 4 `forecastLine`（服务端 `sidebarLines` 不再被 tui 用，仅留 API 对齐）。
-- Produces: 侧边栏第 4 行 `<text>{forecastline}</text>`，fg：含「触顶」 → `theme.text.feedback.error.base`；>30% → warning.base；否则 `theme.text.muted`。
+- Produces: 侧边栏第 4 行 `<text>{forecastline}</text>`，fg 由 `forecastView(...).status` 决定：`exhausted`/`overrun` → `theme.text.feedback.error.base`；`warn`（外推 ≥30%）→ `theme.text.feedback.warning.base`；否则 `theme.text.muted`（按显示文本正则判色已被审查否决）。
 
 - [ ] **Step 1: tui.tsx 三处接线** — import 增 `forecastLine`；`UsagePanel` 内 `const forecast = () => forecastLine(props.snapshot)`；resets `<Show>` 与 Console `<Show>` 之间加：
 
@@ -316,7 +319,7 @@ test("无 forecast 的 snapshot 无 forecast 行", () => {
   - 颜色 class 按 >30% 规则未见 exception 日志；
   - forecast 数据取不到时不出现空行占位。
 - [ ] **Step 3: `/usage` 端到端** — `opencode-cli.exe api post "/api/session/<sesID>/command" --body '{"name":"usage","text":""}'`（body 键 `name`+`text`）→ 输出含 `**本期日消费**` 节与 `→ … 预计用量` 行。
-- [ ] **Step 4: 全量回归 + README** — `node --test test\` 绿；README 节补完。
+- [ ] **Step 4: 全量回归 + README** — `node --test` 绿；README 节补完。
 
 ## Self-Review 记录（自查通过项）
 

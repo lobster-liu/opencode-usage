@@ -4,6 +4,7 @@ import {
   activeCredentialEntry,
   fetchUsage,
   forecastLine,
+  forecastView,
   formatUsd,
   formatUsdCompact,
   goProductLabel,
@@ -84,12 +85,12 @@ function UsagePanel(props: { snapshot?: UsageSnapshot }) {
     formatUsd(props.snapshot?.billing?.availableMicroCents ?? props.snapshot?.billing?.balanceMicroCents)
   const spent = () => formatUsd(props.snapshot?.spentMicroCents)
   const forecast = () => forecastLine(props.snapshot, Date.now())
+  const forecastStatus = () => forecastView(props.snapshot).status
 
   const forecastColor = () => {
-    const label = forecast()
-    if (label.includes("触顶")) return theme.text.feedback.error.base
-    const match = label.match(/约\s*(\d+)%/)
-    if (match && Number(match[1]) >= 30) return theme.text.feedback.warning.base
+    const status = forecastStatus()
+    if (status === "exhausted" || status === "overrun") return theme.text.feedback.error.base
+    if (status === "warn") return theme.text.feedback.warning.base
     return theme.text.muted
   }
 

@@ -137,8 +137,9 @@ test("零消费期不除零", () => {
   const act = { startsAt: "2026-11-01T00:00:00.000Z", daily: [{ date: "2026-11-05", totalCostMicroCents: "0" }] }
   const f = forecastView(snapOf(meter, act), NOW)
   assert.equal(f.percentUsed, 0)
-  assert.ok(f.daily.length >= 1)
+  assert.deepEqual(f.daily, [])
   assert.equal(f.forecastPercent, 0)
+  assert.equal(f.status, "ok")
 })
 
 // ---- Task 3: renderReport 本期日消费节 ----
@@ -183,7 +184,11 @@ test("sparkline 分组与空样", () => {
 test("forecastLabel 三态", () => {
   assert.equal(forecastLabel({ ...F34, forecastPercent: undefined }), "")
   assert.equal(forecastLabel(F34), "月底约 34% ↗")
-  assert.equal(forecastLabel({ ...F34, forecastPercent: 150.4, runsOutAt: "2026-11-28T00:00:00Z" }), "11/28 触顶")
+  assert.equal(forecastLabel({ ...F34, status: "exhausted" }), "已触顶")
+  assert.equal(
+    forecastLabel({ ...F34, status: "overrun", forecastPercent: 150.4, runsOutAt: "2026-11-28T00:00:00Z" }),
+    "11/28 触顶",
+  )
 })
 
 test("sidebarLines 在 Console 行前插 forecast 行", () => {
@@ -198,6 +203,76 @@ test("sidebarLines 在 Console 行前插 forecast 行", () => {
 test("无 forecast 的 snapshot 无 forecast 行", () => {
   const lines = sidebarLines({ ...snapOf(), activity: undefined }, NOW)
   assert.equal(lines.some((l) => l.includes("月底约")), false)
+})
+
+// ---- Review 修复：GFM 表格完整性 / 期首日 / 触顶 / 空日序列 ----
+
+test("日消费表是合法 GFM：每分块有分隔行、分块间空行", () => {
+  const act = {
+    startsAt: "2026-11-01T00:00:00.000Z",
+    daily: Array.from({ length: 8 }, (_, i) => ({
+      date: `2026-11-0${i + 1}`,
+      totalCostMicroCents: "10000000",
+    })),
+  }
+  const out = renderReport(snapOf(META.meter, act), Date.parse("2026-11-08T12:00:00Z"))
+  const section = out.slice(out.indexOf("**本期日消费**"))
+  const table = section.split("\n").filter((line) => line.startsWith("|"))
+  // 两个分块 × (日期表头 + 分隔行 + 金额行) = 6 行
+  assert.equal(table.length, 6)
+  assert.match(table[1], /^\|( --- \|)+$/)
+  assert.match(table[4], /^\|( --- \|)+$/)
+  assert.match(out, /\| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \| \$0\.1 \|\n\n\| 11\/7 \|/)
+})
+
+test("期首日按日期过滤（startsAt 非零点也要包含当天）", () => {
+  const act = {
+    startsAt: "2026-11-04T13:02:31.000Z",
+    daily: [
+      { date: "2026-11-04", totalCostMicroCents: "200000000" },
+      { date: "2026-11-05", totalCostMicroCents: "100000000" },
+    ],
+  }
+  const f = forecastView(snapOf(META.meter, act), Date.parse("2026-11-05T12:00:00Z"))
+  assert.equal(f.daily.length, 2)
+  assert.equal(f.daily[0].date, "2026-11-04")
+  assert.ok(Math.abs(f.totalUsd - 3) < 1e-9)
+})
+
+test("已触顶：status/label/报告均为明确的触顶状态", () => {
+  const used = { resetsAt: "2026-12-01T00:00:00.000Z", limitMicroCents: "6000000000", usedMicroCents: "6000000000" }
+  const act = { startsAt: "2026-11-01T00:00:00.000Z", daily: [{ date: "2026-11-01", totalCostMicroCents: "6000000000" }] }
+  const now = Date.parse("2026-11-05T12:00:00Z")
+  const f = forecastView(snapOf(used, act), now)
+  assert.equal(f.exhausted, true)
+  assert.equal(f.status, "exhausted")
+  assert.equal(forecastLabel(f), "已触顶")
+  const out = renderReport(snapOf(used, act), now)
+  assert.match(out, /→ ⚠ 本期额度已用尽/)
+  assert.doesNotMatch(out, /暂无触顶风险/)
+})
+
+test("activity 成功但日序列为空：不出本节、不伪造 $0、sparkline 为空", () => {
+  const act = { startsAt: "2026-11-01T00:00:00.000Z", daily: [] }
+  const snapshot = snapOf(META.meter, act)
+  const out = renderReport(snapshot, NOW)
+  assert.doesNotMatch(out, /本期日消费/)
+  const f = forecastView(snapshot, NOW)
+  assert.deepEqual(f.daily, [])
+  assert.equal(forecastLine(snapshot, NOW), "月底约 34% ↗")
+})
+
+test("forecast status 三档：warn / overrun / exhausted", () => {
+  assert.equal(forecastView(snapOf(), NOW).status, "warn")
+  const used = { resetsAt: "2026-12-01T00:00:00.000Z", limitMicroCents: "6000000000", usedMicroCents: "4500000000" }
+  const act = {
+    startsAt: "2026-11-01T00:00:00.000Z",
+    daily: [
+      { date: "2026-11-01", totalCostMicroCents: "4500000000" },
+      { date: "2026-11-02", totalCostMicroCents: "0" },
+    ],
+  }
+  assert.equal(forecastView(snapOf(used, act), Date.parse("2026-11-02T12:00:00Z")).status, "overrun")
 })
 
 // ---- Task 5: TUI 凭据解析（v2 SDK 返回 { data } 包装） ----

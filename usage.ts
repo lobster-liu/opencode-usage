@@ -73,15 +73,24 @@ export interface UsageSnapshot {
   errors: string[]
 }
 
+export interface CredentialEntry {
+  id?: string
+  integrationID?: string
+  active?: boolean
+  label?: string
+  value?: { type?: string; access?: string; [key: string]: unknown }
+}
+
 /**
  * TUI 的 v2 SDK 会把凭据列表包成 `{ data: [...] }`（旧版直接返回数组）。
  * 统一取出 `integrationID === "opencode"` 的条目，优先 active 的那条。
  */
-export function activeCredentialEntry(result: unknown): any {
-  const entries: any[] = Array.isArray(result)
-    ? result
-    : Array.isArray((result as any)?.data)
-      ? (result as any).data
+export function activeCredentialEntry(result: unknown): CredentialEntry | undefined {
+  const raw = result as { data?: unknown } | undefined
+  const entries: CredentialEntry[] = Array.isArray(result)
+    ? (result as CredentialEntry[])
+    : Array.isArray(raw?.data)
+      ? (raw!.data as CredentialEntry[])
       : []
   const candidates = entries.filter((item) => item?.integrationID === "opencode")
   return candidates.find((item) => item?.active) ?? candidates[0]
@@ -226,6 +235,8 @@ export interface ForecastView {
   forecastPercent?: number
   runsOutAt?: string
   exhausted: boolean
+  /** 展示语义：ok（<30% 或无外推）/ warn（≥30%）/ overrun（按节奏会提前触顶）/ exhausted（已用尽）。 */
+  status: "ok" | "warn" | "overrun" | "exhausted"
 }
 
 function microCentsToUsd(value: string | number | undefined): number {
@@ -257,8 +268,9 @@ export function forecastView(snapshot: UsageSnapshot | undefined, now: number = 
   const exhausted = used >= limit
   const percentUsed = exhausted || limit <= 0 ? 100 : Math.round((used / limit) * 10000) / 100
 
+  const startDate = new Date(start).toISOString().slice(0, 10)
   const sourceDays = (snapshot.activity?.daily ?? [])
-    .filter((day) => !!day.date && new Date(`${day.date}T00:00:00Z`).getTime() >= start)
+    .filter((day) => !!day.date && day.date >= startDate)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 
   const usdDays = sourceDays.map((day) => ({ date: day.date as string, usd: microCentsToUsd(day.totalCostMicroCents) }))
@@ -270,13 +282,22 @@ export function forecastView(snapshot: UsageSnapshot | undefined, now: number = 
   const daily: ForecastDay[] =
     totalUsd > 0
       ? usdDays.map((day) => ({ date: day.date, usd: day.usd, percent: (percentUsed * day.usd) / totalUsd }))
-      : [{ date: new Date(clampedNow).toISOString().slice(0, 10), usd: 0, percent: 0 }]
+      : []
 
   const forecastPercent = elapsedMs >= 86_400_000 ? (exhausted ? 100 : (percentUsed * (end - start)) / elapsedMs) : undefined
   const runsOutAt =
     forecastPercent !== undefined && forecastPercent > 100 && !exhausted
       ? new Date(start + (elapsedMs * 100) / percentUsed).toISOString()
       : undefined
+  const status: ForecastView["status"] = exhausted
+    ? "exhausted"
+    : forecastPercent === undefined
+      ? "ok"
+      : forecastPercent > 100
+        ? "overrun"
+        : forecastPercent >= 30
+          ? "warn"
+          : "ok"
 
   return {
     windowDays: (end - start) / 86_400_000,
@@ -287,6 +308,7 @@ export function forecastView(snapshot: UsageSnapshot | undefined, now: number = 
     forecastPercent,
     runsOutAt,
     exhausted,
+    status,
   }
 }
 
@@ -312,12 +334,14 @@ export function sparkline(days: number[], width: number = 8): string {
     .join("")
 }
 
-/** `月底约 34% ↗` / `11/28 触顶`；forecast 无效（未定义）时为空。 */
+/** `月底约 34% ↗` / `11/28 触顶` / `已触顶`；forecast 无效（未定义）时为空。 */
 export function forecastLabel(forecast: ForecastView | undefined): string {
-  const value = forecast?.forecastPercent
-  if (value === undefined) return ""
-  if (value <= 100) return `月底约 ${Math.round(value)}% ↗`
-  return forecast.runsOutAt ? `${shortDate(new Date(forecast.runsOutAt).toISOString().slice(0, 10))} 触顶` : ""
+  if (!forecast || forecast.forecastPercent === undefined) return ""
+  if (forecast.status === "exhausted") return "已触顶"
+  if (forecast.status === "overrun") {
+    return forecast.runsOutAt ? `${shortDate(new Date(forecast.runsOutAt).toISOString().slice(0, 10))} 触顶` : ""
+  }
+  return `月底约 ${Math.round(forecast.forecastPercent)}% ↗`
 }
 
 /** 侧边栏一行：`▁▂▄▅▆▇ 月底约 34% ↗`；本期刚开始（<1 天）无 forecast 时不返回。 */
@@ -407,14 +431,17 @@ export function renderReport(snapshot: UsageSnapshot, now: number = Date.now()):
     const today = new Date(now).toISOString().slice(0, 10)
     for (const group of chunk(forecast.daily, 6)) {
       lines.push(`| ${group.map((d) => shortDate(d.date) + (d.date === today ? "（今）" : "")).join(" | ")} |`)
+      lines.push(`| ${group.map(() => "---").join(" | ")} |`)
       lines.push(`| ${group.map((d) => formatUsdCompact(d.usd * 100_000_000)).join(" | ")} |`)
+      lines.push("")
     }
-    lines.push("")
     const endDate = shortDate(new Date(snapshot.go?.access?.meters?.month?.resetsAt ?? "").toISOString().slice(0, 10))
-    if (forecast.forecastPercent !== undefined && forecast.forecastPercent <= 100) {
-      lines.push(`→ 本期结束（${endDate}）预计用量 ~${Math.round(forecast.forecastPercent)}%，暂无触顶风险`)
-    } else if (forecast.runsOutAt) {
+    if (forecast.status === "exhausted") {
+      lines.push("→ ⚠ 本期额度已用尽")
+    } else if (forecast.status === "overrun" && forecast.runsOutAt) {
       lines.push(`→ ⚠ 按此节奏预计 ${shortDate(new Date(forecast.runsOutAt).toISOString().slice(0, 10))} 触顶`)
+    } else if (forecast.forecastPercent !== undefined) {
+      lines.push(`→ 本期结束（${endDate}）预计用量 ~${Math.round(forecast.forecastPercent)}%，暂无触顶风险`)
     }
     lines.push("")
   }
