@@ -1,7 +1,9 @@
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import { createSignal, Show } from "solid-js"
 import {
+  activeCredentialEntry,
   fetchUsage,
+  forecastLine,
   formatUsd,
   formatUsdCompact,
   goProductLabel,
@@ -9,7 +11,6 @@ import {
   type UsageSnapshot,
 } from "./usage.ts"
 
-const INTEGRATION_ID = "opencode"
 const REFRESH_INTERVAL = 60_000
 
 export default Plugin.define({
@@ -21,8 +22,8 @@ export default Plugin.define({
     async function refresh() {
       setRefreshing(true)
       try {
-        const entries = (await context.client.credential.list()) as any[]
-        const entry = entries.find((item) => item?.integrationID === INTEGRATION_ID)
+        const entries = await context.client.credential.list()
+        const entry = activeCredentialEntry(entries)
         const value = entry?.value
         if (!value || value.type !== "oauth" || !value.access) {
           setSnapshot({ fetchedAt: Date.now(), errors: ["未连接 OpenCode Console（/connect）"] })
@@ -82,6 +83,15 @@ function UsagePanel(props: { snapshot?: UsageSnapshot }) {
   const balance = () =>
     formatUsd(props.snapshot?.billing?.availableMicroCents ?? props.snapshot?.billing?.balanceMicroCents)
   const spent = () => formatUsd(props.snapshot?.spentMicroCents)
+  const forecast = () => forecastLine(props.snapshot, Date.now())
+
+  const forecastColor = () => {
+    const label = forecast()
+    if (label.includes("触顶")) return theme.text.feedback.error.base
+    const match = label.match(/约\s*(\d+)%/)
+    if (match && Number(match[1]) >= 30) return theme.text.feedback.warning.base
+    return theme.text.muted
+  }
 
   const usageColor = () => {
     const value = peak()
@@ -111,6 +121,9 @@ function UsagePanel(props: { snapshot?: UsageSnapshot }) {
         </text>
         <Show when={resets().length > 0}>
           <text fg={theme.text.faint}>↻ {resets().map((meter) => meter.reset).join(" · ")}</text>
+        </Show>
+        <Show when={forecast()}>
+          <text fg={forecastColor()}>{forecast()}</text>
         </Show>
       </Show>
       <Show when={balance() !== "-"}>

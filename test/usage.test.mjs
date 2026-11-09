@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
+  activeCredentialEntry,
   fetchUsage,
   forecastLabel,
   forecastLine,
@@ -197,4 +198,20 @@ test("sidebarLines 在 Console 行前插 forecast 行", () => {
 test("无 forecast 的 snapshot 无 forecast 行", () => {
   const lines = sidebarLines({ ...snapOf(), activity: undefined }, NOW)
   assert.equal(lines.some((l) => l.includes("月底约")), false)
+})
+
+// ---- Task 5: TUI 凭据解析（v2 SDK 返回 { data } 包装） ----
+
+const CREDS = [
+  { integrationID: "opencode", active: false, value: { type: "oauth", access: "st_old" } },
+  { integrationID: "opencode", active: true, value: { type: "oauth", access: "st_new" } },
+]
+
+test("activeCredentialEntry 兼容数组与 { data } 包装，优先 active", () => {
+  assert.equal(activeCredentialEntry(CREDS).value.access, "st_new")
+  assert.equal(activeCredentialEntry({ data: CREDS }).value.access, "st_new")
+  assert.equal(activeCredentialEntry([...CREDS].reverse()).value.access, "st_new")
+  assert.equal(activeCredentialEntry(undefined), undefined)
+  assert.equal(activeCredentialEntry({ data: [] }), undefined)
+  assert.equal(activeCredentialEntry([{ integrationID: "other", active: true }]), undefined)
 })

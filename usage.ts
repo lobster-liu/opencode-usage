@@ -73,6 +73,20 @@ export interface UsageSnapshot {
   errors: string[]
 }
 
+/**
+ * TUI 的 v2 SDK 会把凭据列表包成 `{ data: [...] }`（旧版直接返回数组）。
+ * 统一取出 `integrationID === "opencode"` 的条目，优先 active 的那条。
+ */
+export function activeCredentialEntry(result: unknown): any {
+  const entries: any[] = Array.isArray(result)
+    ? result
+    : Array.isArray((result as any)?.data)
+      ? (result as any).data
+      : []
+  const candidates = entries.filter((item) => item?.integrationID === "opencode")
+  return candidates.find((item) => item?.active) ?? candidates[0]
+}
+
 export interface MeterView {
   key: "fiveHour" | "week" | "month"
   label: string
